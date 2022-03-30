@@ -1,5 +1,12 @@
 import os 
 import numpy as np 
+from transformers import BertTokenizer 
+from torch.utils.data import Dataset 
+import torch 
+from PIL import Image 
+import requests 
+
+from utils import mt_convert_url 
 
 
 def filter(lines, threshold=0.5, key_word='dp.cmt'): 
@@ -34,7 +41,73 @@ def data_statics(data):
     print('average_length: ', np.mean(len_list))
 
 
-if __name__ == '__main__': 
-    data_path = 'data' 
-    data = data_read(data_path) 
-    data_statics(data)
+
+class CommentDataset(Dataset): 
+    def __init__(self, data, tokenizer, image_preprocess, image_encoder, args):
+        self.data = data 
+        self.tokenizer = tokenizer 
+        self.image_preprocess = image_preprocess 
+        self.image_encoder = image_encoder 
+        self.max_length = args.max_length 
+        self.prefix_length = args.prefix_length 
+
+    def __len__(self): 
+        return len(self.data) 
+
+    def pad_tokens(self, text_ids): 
+        padding = self.max_length - text_ids.shape[0] 
+        if padding > 0: 
+            text_ids = torch.cat((text_ids, torch.zeros(padding, dtype=torch.int64)-1)) 
+        elif padding < 0: 
+            text_ids = text_ids[:self.max_length] 
+        mask = text_ids.ge(0) 
+        text_ids[~mask] = 0 
+        mask = mask.float()
+        mask = torch.cat((torch.ones(self.prefix_length), mask), dim=0)  # adding prefix mask
+        return text_ids, mask
+
+    def __getitem__(self, index): 
+        img_txt_pair = self.data[index] 
+        url = img_txt_pair[1] 
+        txt = img_txt_pair[0] 
+        image = Image.open(requests.get(url, stream=True).raw) 
+        image = self.image_preprocess(image).unsqueeze(0) 
+        image_features = self.image_encoder.encode_image(image).squeeze(0)
+        txt_ids = torch.Tensor(tokenize(txt, self.tokenizer)).long() 
+        txt_ids, mask = self.pad_tokens(txt_ids)
+        return image_features, txt_ids, mask 
+    
+
+
+
+
+def tokenize(obj,tokenizer):
+    if isinstance(obj, str):
+        return tokenizer.convert_tokens_to_ids(tokenizer.tokenize(obj))
+    if isinstance(obj, dict):
+        return dict((n, tokenize(o)) for n, o in obj.items())
+    return list(tokenize(o) for o in obj) 
+
+
+
+def collate_fn(batch, pad_token=0): 
+    def padding(seq, pad_token): 
+        max_len = max([i.size(0) for i in seq]) 
+        if len(seq[0].size()) == 1: 
+            result = torch.ones((len(seq), max_len)).long() * pad_token 
+        else: 
+            result = torch.ones((len(seq), max_len, seq[0].size(-1))).float() * pad_token 
+        for i in range(len(seq)): 
+            result[i, :seq[i].size(0)] = seq[i] 
+        return result 
+    
+    img_list, txt_list = [], [] 
+    for i in batch: 
+        img_list.append(i[0]) 
+        txt_list.append(i[1]) 
+    txt_list = padding(txt_list, pad_token) 
+    img_list = torch.stack(img_list)
+    return img_list, txt_list 
+
+
+
