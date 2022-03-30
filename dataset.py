@@ -8,6 +8,7 @@ import requests
 
 from utils import mt_convert_url 
 
+GPU_FLAG = False 
 
 def filter(lines, threshold=0.5, key_word='dp.cmt'): 
     refine_lines = [] 
@@ -69,6 +70,8 @@ class CommentDataset(Dataset):
     def __getitem__(self, index): 
         img_txt_pair = self.data[index] 
         url = img_txt_pair[1] 
+        if GPU_FLAG == True: 
+            url = mt_convert_url(url)
         txt = img_txt_pair[0] 
         image = Image.open(requests.get(url, stream=True).raw) 
         image = self.image_preprocess(image).unsqueeze(0) 
