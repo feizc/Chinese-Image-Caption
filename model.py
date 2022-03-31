@@ -194,7 +194,7 @@ class CaptionModel(nn.Module):
 class CaptionPrefix(CaptionModel):
 
     def parameters(self, recurse: bool = True):
-        return self.clip_project.parameters()
+        return self.img_project.parameters()
 
     def train(self, mode: bool = True):
         super(CaptionPrefix, self).train(mode)

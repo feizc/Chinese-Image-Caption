@@ -6,6 +6,10 @@ import torch
 from PIL import Image 
 import requests 
 
+
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 from utils import mt_convert_url 
 
 GPU_FLAG = False 
