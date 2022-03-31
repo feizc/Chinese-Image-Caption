@@ -175,11 +175,12 @@ class CaptionModel(nn.Module):
         out = self.gpt(inputs_embeds=embedding_cat, labels=labels, attention_mask=mask)
         return out
 
-    def __init__(self, prefix_length: int, clip_length: Optional[int] = None, prefix_size: int = 512,
+    def __init__(self, prefix_length: int, tokenizer, clip_length: Optional[int] = None, prefix_size: int = 512,
                  num_layers: int = 8, mapping_type: MappingType = MappingType.MLP):
         super(CaptionModel, self).__init__()
         self.prefix_length = prefix_length
-        self.gpt = GPT2LMHeadModel.from_pretrained('ckpt/gpt2')
+        self.gpt = GPT2LMHeadModel.from_pretrained('ckpt/gpt2') 
+        self.gpt.resize_token_embeddings(len(tokenizer))
         self.gpt_embedding_size = self.gpt.transformer.wte.weight.shape[1]
         if mapping_type == MappingType.MLP:
             self.img_project = MLP((prefix_size, (self.gpt_embedding_size * prefix_length) // 2,

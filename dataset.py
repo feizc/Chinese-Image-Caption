@@ -9,6 +9,9 @@ import requests
 from utils import mt_convert_url 
 
 GPU_FLAG = False 
+SPECIAL_TOKENS = ["[bos]", "[eos]",] 
+SPECIAL_TOKENS_DICT = {'bos_token': "[bos]", 'eos_token': "[eos]"}
+
 
 def filter(lines, threshold=0.5, key_word='dp.cmt'): 
     refine_lines = [] 
@@ -44,13 +47,15 @@ def data_statics(data):
 
 
 class CommentDataset(Dataset): 
-    def __init__(self, data, tokenizer, image_preprocess, image_encoder, args):
+    def __init__(self, data, tokenizer, image_preprocess, image_encoder, args, device):
         self.data = data 
         self.tokenizer = tokenizer 
         self.image_preprocess = image_preprocess 
         self.image_encoder = image_encoder 
         self.max_length = args.max_length 
         self.prefix_length = args.prefix_length 
+        self.device = device 
+        self.bos, self.eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS)
 
     def __len__(self): 
         return len(self.data) 
@@ -73,14 +78,13 @@ class CommentDataset(Dataset):
         if GPU_FLAG == True: 
             url = mt_convert_url(url)
         txt = img_txt_pair[0] 
-        image = Image.open(requests.get(url, stream=True).raw) 
-        image = self.image_preprocess(image).unsqueeze(0) 
+        image = Image.open(requests.get(url, stream=True).raw)
+        image = self.image_preprocess(image).unsqueeze(0).to(self.device)
         image_features = self.image_encoder.encode_image(image).squeeze(0)
-        txt_ids = torch.Tensor(tokenize(txt, self.tokenizer)).long() 
+        txt_ids = torch.Tensor([self.bos] + tokenize(txt, self.tokenizer) + [self.eos]).long() 
         txt_ids, mask = self.pad_tokens(txt_ids)
         return image_features, txt_ids, mask 
     
-
 
 
 

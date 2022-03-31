@@ -10,8 +10,12 @@ from torch.nn import functional as nnf
 from dataset import CommentDataset, data_read
 from model import CaptionModel 
 from torch.utils.data import Dataset, DataLoader 
+from utils import accuracy_compute 
 
 device = "cuda" if torch.cuda.is_available() else "cpu" 
+SPECIAL_TOKENS = ["[bos]", "[eos]",] 
+SPECIAL_TOKENS_DICT = {'bos_token': "[bos]", 'eos_token': "[eos]"}
+
 
 def train(train_dataloader, model, args):  
     if not os.path.exists(args.output_dir):
@@ -23,6 +27,8 @@ def train(train_dataloader, model, args):
         optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=args.epochs * len(train_dataloader)
     )
 
+    running_loss = .0 
+    runing_acc = .0 
     for epoch in range(args.epochs): 
         print(f">>> Training epoch {epoch}") 
         progress = tqdm(total=len(train_dataloader), desc='image captioning') 
@@ -35,16 +41,19 @@ def train(train_dataloader, model, args):
             loss.backward()
             optimizer.step()
             scheduler.step()
-            optimizer.zero_grad()
-            progress.set_postfix({"loss": loss.item()})
+            optimizer.zero_grad() 
+            running_loss += loss.item() 
+            runing_acc += accuracy_compute(logits, tokens)
+            progress.set_postfix({"loss": running_loss / (idx + 1), "acc": runing_acc / (idx + 1)})
             progress.update()
             if idx % 10000 == 0:
                 torch.save(
                     model.state_dict(),
                     os.path.join(args.output_dir, "latest.pt"),
                 )
-            progress.close()
-            break 
+            if idx == 3:
+                break 
+        progress.close() 
         break 
 
 
@@ -65,23 +74,23 @@ def main():
     args = parser.parse_args()
     gpt2_path = 'ckpt/gpt2' 
     tokenizer = BertTokenizer.from_pretrained(gpt2_path) 
+    tokenizer.add_special_tokens(SPECIAL_TOKENS_DICT) 
 
-    clip_model, preprocess = clip.load("ViT-B/32", device=device) 
+    clip_model, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
 
     data = data_read(args.data_path) 
-    dataset = CommentDataset(data, tokenizer, preprocess, clip_model, args) 
+    dataset = CommentDataset(data, tokenizer, preprocess, clip_model, args, device) 
     train_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     prefix_dim = 512
-    model =  CaptionModel(args.prefix_length, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,
+    model =  CaptionModel(args.prefix_length, tokenizer=tokenizer, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,
                             num_layers=args.num_layers, mapping_type=args.mapping_type)
     model = model.to(device) 
 
     train(train_dataloader, model, args)
 
 
-    # text_generator = TextGenerationPipeline(model, tokenizer)  
-    # print(text_generator("这是很久之前的事情了", max_length=100, do_sample=True)) 
-
 if __name__ == '__main__':
     main()
+
+
