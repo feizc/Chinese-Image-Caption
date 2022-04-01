@@ -85,6 +85,7 @@ class CommentDataset(Dataset):
         image = Image.open(requests.get(url, stream=True).raw)
         image = self.image_preprocess(image).unsqueeze(0).to(self.device)
         image_features = self.image_encoder.encode_image(image).squeeze(0)
+        # image_features = torch.zeros((1, 512)).float().squeeze(0)
         txt_ids = torch.Tensor([self.bos] + tokenize(txt, self.tokenizer) + [self.eos]).long() 
         txt_ids, mask = self.pad_tokens(txt_ids)
         return image_features, txt_ids, mask 
