@@ -1,5 +1,4 @@
 # store the image embedding for training acceleration 
-from pydoc import cli
 import torch 
 from dataset import data_read, data_statics 
 from utils import mt_convert_url 
@@ -13,7 +12,7 @@ import requests
 
 DATA_STATIC = True 
 GPU_FLAG = False 
-device = "cuda" if torch.cuda.is_available() else "cpu" 
+device = "cuda:0" if torch.cuda.is_available() else "cpu" 
 
 
 def main(): 
