@@ -27,7 +27,7 @@ def main():
     all_embeddings = [] 
     all_captions = [] 
     for i in tqdm(range(len(data))): 
-        d = {'caption:': data[i][0]} 
+        d = {'caption': data[i][0]} 
         url = data[i][1] 
         if GPU_FLAG == True: 
             url = mt_convert_url(url) 

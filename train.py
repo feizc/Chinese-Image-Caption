@@ -7,10 +7,12 @@ from tqdm import tqdm
 from torch.nn import functional as nnf
 
 
-from dataset import CommentDataset, data_read
+from dataset import CommentDataset, data_read, FastCommentDataset
 from model import CaptionModel 
 from torch.utils.data import Dataset, DataLoader 
 from utils import accuracy_compute 
+
+FAST_TRAIN = True 
 
 device = "cuda" if torch.cuda.is_available() else "cpu" 
 SPECIAL_TOKENS = ["[bos]", "[eos]",] 
@@ -34,7 +36,7 @@ def train(train_dataloader, model, args):
         progress = tqdm(total=len(train_dataloader), desc='image captioning') 
         for idx, (img_features, tokens, mask) in enumerate(train_dataloader):
             model.zero_grad()
-            tokens, mask, img_features = tokens.to(device), mask.to(device), img_features.to(device, dtype=torch.float32)
+            tokens, mask, img_features = tokens.to(device), mask.to(device), img_features.to(device, dtype=torch.float32) 
             outputs = model(tokens, img_features, mask) 
             logits = outputs.logits[:, args.prefix_length - 1: -1] 
             loss = nnf.cross_entropy(logits.reshape(-1, logits.shape[-1]), tokens.flatten(), ignore_index=0)
@@ -62,6 +64,7 @@ def main():
     parser = argparse.ArgumentParser() 
     parser.add_argument('--data_path', default='./data')
     parser.add_argument('--output_dir', default='./ckpt/caption') 
+    parser.add_argument('--fast_data_path', default='./data/train.pkl')
     parser.add_argument('--prefix_length', type=int, default=10) 
     parser.add_argument('--max_length', type=int, default=30) 
     parser.add_argument('--num_layers', type=int, default=8) 
@@ -78,8 +81,11 @@ def main():
 
     clip_model, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
 
-    data = data_read(args.data_path) 
-    dataset = CommentDataset(data, tokenizer, preprocess, clip_model, args, device) 
+    if FAST_TRAIN == True: 
+        dataset = FastCommentDataset(args.fast_data_path, tokenizer, args, device) 
+    else:
+        data = data_read(args.data_path) 
+        dataset = CommentDataset(data, tokenizer, preprocess, clip_model, args, device) 
     train_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     prefix_dim = 512
