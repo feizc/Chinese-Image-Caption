@@ -1,4 +1,5 @@
-import os 
+import os
+import pickle 
 import numpy as np 
 from transformers import BertTokenizer 
 from torch.utils.data import Dataset 
@@ -17,7 +18,7 @@ SPECIAL_TOKENS = ["[bos]", "[eos]",]
 SPECIAL_TOKENS_DICT = {'bos_token': "[bos]", 'eos_token': "[eos]"}
 
 
-def filter(lines, threshold=0.5, key_word='dp.cmt'): 
+def filter(lines, min_len=10, threshold=0.5, key_word='dp.cmt'): 
     refine_lines = [] 
     for line in lines: 
         if key_word not in line: 
@@ -26,17 +27,19 @@ def filter(lines, threshold=0.5, key_word='dp.cmt'):
         p = float(line[0]) 
         if p < threshold: 
             continue 
+        if len(line[1]) < min_len:
+            continue
         refine_lines.append([line[1], line[2]]) 
     return refine_lines 
 
 
-def data_read(data_path): 
+def data_read(data_path, threshold=0.9, min_len=10): 
     file_list = os.listdir(data_path) 
     data = [] 
     for file in file_list:
         file_path = os.path.join(data_path, file) 
         with open(file_path, 'r') as f: 
-            lines = filter(f.readlines()) 
+            lines = filter(f.readlines(), min_len, threshold)  
         data += lines 
     return data 
 
@@ -90,6 +93,43 @@ class CommentDataset(Dataset):
         txt_ids, mask = self.pad_tokens(txt_ids)
         return image_features, txt_ids, mask 
     
+
+
+
+class FastCommentDataset(Dataset): 
+    def __init__(self, data_path, tokenizer, args, device): 
+        self.tokenizer = tokenizer 
+        with open(data_path, 'rb') as f: 
+            all_data = pickle.load(f) 
+        self.image_embeddings = all_data['image_embedding'] 
+        self.captions = all_data['captions']
+        self.max_length = args.max_length 
+        self.prefix_length = args.prefix_length 
+        self.device = device 
+        self.bos, self.eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS) 
+    
+    def __len__(self): 
+        return len(self.captions) 
+
+    def pad_tokens(self, text_ids): 
+        padding = self.max_length - text_ids.shape[0] 
+        if padding > 0: 
+            text_ids = torch.cat((text_ids, torch.zeros(padding, dtype=torch.int64)-1)) 
+        elif padding < 0: 
+            text_ids = text_ids[:self.max_length] 
+        mask = text_ids.ge(0) 
+        text_ids[~mask] = 0 
+        mask = mask.float()
+        mask = torch.cat((torch.ones(self.prefix_length), mask), dim=0)  # adding prefix mask
+        return text_ids, mask
+    
+    def __getitem__(self, index):
+        # image_features = self.image_embeddings[self.captions[index]['image_embedding']] 
+        image_features = self.image_embeddings[index] 
+        txt = self.captions[index]['caption'] 
+        txt_ids = torch.Tensor([self.bos] + tokenize(txt, self.tokenizer) + [self.eos]).long() 
+        txt_ids, mask = self.pad_tokens(txt_ids)
+        return image_features, txt_ids, mask 
 
 
 

@@ -1,4 +1,5 @@
 # store the image embedding for training acceleration 
+from sys import flags
 import torch 
 from dataset import data_read, data_statics 
 from utils import mt_convert_url 
@@ -53,5 +54,32 @@ def main():
         pickle.dump({'image_embedding': torch.cat(all_embeddings, dim=0), 'captions': all_captions}, f)
 
 
+def pickle_data_combine(data_path='./data'): 
+    name_list = os.listdir(data_path) 
+
+    image_embedding = [] 
+    captions = []
+    for name in name_list: 
+        if '.pkl' not in name:
+            continue 
+        if 'combine' in name:
+            continue
+        name_path = os.path.join(data_path, name)
+        with open(name_path, 'rb') as f: 
+            all_data = pickle.load(f) 
+
+        image_embedding.append(all_data['image_embedding'])
+        captions += all_data['captions'] 
+    
+    print('combine size: ')
+    print(torch.cat(image_embedding, dim=0).size())
+    print(len(captions)) 
+
+    output_path = os.path.join(data_path, 'train_combine.pkl') 
+    with open(output_path, 'wb') as f: 
+        pickle.dump({'image_embedding': image_embedding, 'captions': captions}, f)
+
+
 if __name__ == '__main__':
-    main()
+    # main() 
+    pickle_data_combine()
