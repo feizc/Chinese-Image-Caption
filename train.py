@@ -5,7 +5,9 @@ import argparse
 import os 
 from tqdm import tqdm 
 from torch.nn import functional as nnf
-
+import random 
+import numpy as np 
+from shutil import copyfile 
 
 from dataset import CommentDataset, data_read, FastCommentDataset
 from model import CaptionModel 
@@ -17,22 +19,40 @@ FAST_TRAIN = True
 device = "cuda" if torch.cuda.is_available() else "cpu" 
 SPECIAL_TOKENS = ["[bos]", "[eos]",] 
 SPECIAL_TOKENS_DICT = {'bos_token': "[bos]", 'eos_token': "[eos]"}
+random.seed(1234)
+torch.manual_seed(1234)
+np.random.seed(1234)
 
 
 def train(train_dataloader, model, args):  
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir) 
     
-    model.train() 
     optimizer = AdamW(model.parameters(), lr=args.lr) 
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=args.epochs * len(train_dataloader)
-    )
+    ) 
 
-    running_loss = .0 
-    runing_acc = .0 
+    if args.resume_last: 
+        fname = os.path.join(args.output_dir, "latest.pt") 
+        if os.path.exists(fname):
+            data = torch.load(fname)
+            torch.set_rng_state(data['torch_rng_state'])
+            # torch.cuda.set_rng_state(data['cuda_rng_state'])
+            np.random.set_state(data['numpy_rng_state'])
+            random.setstate(data['random_rng_state'])
+            model.load_state_dict(data['state_dict'], strict=False)
+            optimizer.load_state_dict(data['optimizer'])
+            scheduler.load_state_dict(data['scheduler']) 
+            print('load last ckpt!')
+
+
+    model.train() 
     for epoch in range(args.epochs): 
         print(f">>> Training epoch {epoch}") 
+        running_loss = .0 
+        running_acc = .0 
+        best_acc = .0 
         progress = tqdm(total=len(train_dataloader), desc='image captioning') 
         for idx, (img_features, tokens, mask) in enumerate(train_dataloader):
             model.zero_grad()
@@ -45,17 +65,28 @@ def train(train_dataloader, model, args):
             scheduler.step()
             optimizer.zero_grad() 
             running_loss += loss.item() 
-            runing_acc += accuracy_compute(logits, tokens)
-            progress.set_postfix({"loss": running_loss / (idx + 1), "acc": runing_acc / (idx + 1)})
+            running_acc += accuracy_compute(logits, tokens)
+            progress.set_postfix({"loss": running_loss / (idx + 1), "acc": running_acc / (idx + 1)})
             progress.update()
             if idx % 10000 == 0:
-                torch.save(
-                    model.state_dict(),
-                    os.path.join(args.output_dir, "latest.pt"),
+                torch.save({
+                    'torch_rng_state': torch.get_rng_state(),
+                    # 'cuda_rng_state': torch.cuda.get_rng_state(),
+                    'numpy_rng_state': np.random.get_state(),
+                    'random_rng_state': random.getstate(),
+                    'epoch': epoch,
+                    "acc": running_acc / (idx + 1),
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }, os.path.join(args.output_dir, "latest.pt"),
                 )
             if idx == 3:
                 break 
         progress.close() 
+        if running_acc > best_acc: 
+            best_acc = running_acc 
+            copyfile(os.path.join(args.output_dir, "latest.pt"), os.path.join(args.output_dir, "best.pt"))
         break 
 
 
@@ -73,7 +104,8 @@ def main():
     parser.add_argument('--lr', type=float, default=2e-5) 
     parser.add_argument('--epochs', type=int, default=10) 
     parser.add_argument('--warmup_steps', type=int, default=5000) 
-    parser.add_argument('--mapping_type', type=str, default='transformer', help='mlp/transformer')
+    parser.add_argument('--mapping_type', type=str, default='transformer', help='mlp/transformer') 
+    parser.add_argument('--resume_last', type=bool, default=True)  
     args = parser.parse_args()
     gpt2_path = 'ckpt/gpt2' 
     tokenizer = BertTokenizer.from_pretrained(gpt2_path) 
