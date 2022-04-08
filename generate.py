@@ -63,7 +63,7 @@ def sample_sequence(image_features, model, tokenizer, args):
     bos, eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS) 
     ys = [bos] 
     for i in range(args.max_length): 
-        tokens = torch.Tensor(ys).long().unsqueeze(0) 
+        tokens = torch.Tensor(ys).long().unsqueeze(0).to(device)
         outputs = model(tokens, image_features) 
         logits = outputs.logits[:, -1][0] / args.temperature 
         logits = top_filtering(logits, top_k=args.top_k, top_p=args.top_p)
@@ -87,7 +87,7 @@ def greedy_decode(image_features, model, tokenizer, args):
     bos, eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS) 
     ys = [bos] 
     for i in range(args.max_length): 
-        tokens = torch.Tensor(ys).long().unsqueeze(0)
+        tokens = torch.Tensor(ys).long().unsqueeze(0).to(device)
         outputs = model(tokens, image_features) 
         logits = outputs.logits[:, -1]
         logits = logits.cpu().data.numpy() 
@@ -109,7 +109,7 @@ def main():
 
     parser = argparse.ArgumentParser() 
     parser.add_argument('--data_path', default='./test')
-    parser.add_argument('--model_path', default='./ckpt/caption/latest.pt') 
+    parser.add_argument('--model_path', default='./ckpt/latest.pt') 
     parser.add_argument('--token_path', default='./ckpt/gpt2') 
     parser.add_argument('--prefix_length', type=int, default=10)  
     parser.add_argument('--prefix_length_clip', type=int, default=10) 
@@ -132,7 +132,7 @@ def main():
                             num_layers=args.num_layers, mapping_type=args.mapping_type) 
     
     weight_dict = torch.load(args.model_path, map_location=None) 
-    model.load_state_dict(weight_dict) 
+    model.load_state_dict(weight_dict['state_dict'], strict=False) 
     model = model.to(device) 
     model.eval() 
 
@@ -141,7 +141,7 @@ def main():
         img_path = os.path.join(args.data_path, img_name) 
         image = Image.open(img_path) 
         image = preprocess(image).unsqueeze(0).to(device)
-        image_features = clip_model.encode_image(image) 
+        image_features = clip_model.encode_image(image).float()
         if DECODE_STRATEGY == 'greedy': 
             caps = greedy_decode(image_features, model, tokenizer, args) 
         elif DECODE_STRATEGY == 'sample': 
