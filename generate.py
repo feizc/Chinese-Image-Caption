@@ -1,4 +1,3 @@
-from ast import arg
 import torch 
 from transformers import BertTokenizer 
 import argparse 
@@ -6,16 +5,24 @@ import os
 from PIL import Image 
 import numpy as np 
 import torch.nn.functional as F
+from dataset import filter
+from random import sample 
+import requests 
 
 from model import CaptionModel 
 import clip 
+from utils import mt_convert_url 
+
 
 
 SPECIAL_TOKENS = ["[bos]", "[eos]",] 
 SPECIAL_TOKENS_DICT = {'bos_token': "[bos]", 'eos_token': "[eos]"} 
-device = "cuda" if torch.cuda.is_available() else "cpu"  
+device = "cuda:0" if torch.cuda.is_available() else "cpu"  
 # 'greedy' 
 DECODE_STRATEGY = 'sample'
+FROM_URL = True 
+GPU_FLAG = False  
+
 
 
 
@@ -104,12 +111,25 @@ def test_data_read(path):
     return img_name_list 
 
 
+def case_selection(data_path, number): 
+    with open(data_path, 'r', encoding='utf-8') as f: 
+        lines = filter(f.readlines(), threshold=0.9, min_len=15) 
+    return sample(lines, number) 
+
+
+
+def list2str(sentence):
+    res = ''
+    for s in sentence: 
+        res += s 
+    return res 
+
+
 
 def main(): 
-
     parser = argparse.ArgumentParser() 
     parser.add_argument('--data_path', default='./test')
-    parser.add_argument('--model_path', default='./ckpt/latest.pt') 
+    parser.add_argument('--model_path', default='./ckpt/caption/latest.pt') 
     parser.add_argument('--token_path', default='./ckpt/gpt2') 
     parser.add_argument('--prefix_length', type=int, default=10)  
     parser.add_argument('--prefix_length_clip', type=int, default=10) 
@@ -136,17 +156,47 @@ def main():
     model = model.to(device) 
     model.eval() 
 
-    img_name_list = test_data_read(args.data_path) 
-    for img_name in img_name_list: 
-        img_path = os.path.join(args.data_path, img_name) 
-        image = Image.open(img_path) 
-        image = preprocess(image).unsqueeze(0).to(device)
-        image_features = clip_model.encode_image(image).float()
-        if DECODE_STRATEGY == 'greedy': 
-            caps = greedy_decode(image_features, model, tokenizer, args) 
-        elif DECODE_STRATEGY == 'sample': 
-            caps = sample_sequence(image_features, model, tokenizer, args)
-            print(tokenizer.batch_decode(caps))
+    if FROM_URL == False: 
+        print('test from case')
+        img_name_list = test_data_read(args.data_path) 
+        for img_name in img_name_list: 
+            img_path = os.path.join(args.data_path, img_name) 
+            image = Image.open(img_path) 
+            image = preprocess(image).unsqueeze(0).to(device)
+            image_features = clip_model.encode_image(image).float()
+            if DECODE_STRATEGY == 'greedy': 
+                caps = greedy_decode(image_features, model, tokenizer, args) 
+            elif DECODE_STRATEGY == 'sample': 
+                caps = sample_sequence(image_features, model, tokenizer, args)
+                print(tokenizer.batch_decode(caps)) 
+    
+    else: 
+        print('test from data') 
+        data_path = './data/part-00044' 
+        samples = case_selection(data_path, 2) 
+        results = []
+        for pair in samples: 
+            url = pair[1] 
+            if GPU_FLAG == True: 
+                url = mt_convert_url(url) 
+            image = Image.open(requests.get(url, stream=True).raw)
+            image = preprocess(image).unsqueeze(0).to(device)
+            image_features = clip_model.encode_image(image).float()
+            if DECODE_STRATEGY == 'greedy': 
+                caps = greedy_decode(image_features, model, tokenizer, args) 
+            elif DECODE_STRATEGY == 'sample': 
+                caps = sample_sequence(image_features, model, tokenizer, args) 
+                print(pair[1])
+                print(pair[0])
+                print(tokenizer.batch_decode(caps)) 
+                results.append('url: ' + pair[1])
+                results.append('annotation: ' + pair[0]) 
+                results.append('model: ' + list2str(tokenizer.batch_decode(caps))) 
+                results.append(' ')
+        with open('result.txt', 'w', encoding='utf-8') as f: 
+            for line in results: 
+                f.write(line + '\n')
+
 
 
 

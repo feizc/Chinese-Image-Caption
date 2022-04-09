@@ -33,10 +33,12 @@ def filter(lines, min_len=10, threshold=0.5, key_word='dp.cmt'):
     return refine_lines 
 
 
-def data_read(data_path, threshold=0.9, min_len=10): 
+def data_read(data_path, threshold=0.9, min_len=15): 
     file_list = os.listdir(data_path) 
     data = [] 
-    for file in file_list:
+    for file in file_list: 
+        if 'part' not in file:
+            continue 
         file_path = os.path.join(data_path, file) 
         with open(file_path, 'r') as f: 
             lines = filter(f.readlines(), min_len, threshold)  

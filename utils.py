@@ -45,4 +45,6 @@ def accuracy_compute(logits, labels, top_k=5):
     for num in nums:
         if num != 0:
             length += 1
-    return correct_total / float(length)
+    return correct_total / float(length) 
+
+

@@ -24,6 +24,10 @@ torch.manual_seed(1234)
 np.random.seed(1234)
 
 
+import warnings 
+warnings.filterwarnings('ignore')
+
+
 def train(train_dataloader, model, args):  
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir) 

@@ -54,6 +54,7 @@ def main():
         pickle.dump({'image_embedding': torch.cat(all_embeddings, dim=0), 'captions': all_captions}, f)
 
 
+# combine the pickle from different sources 
 def pickle_data_combine(data_path='./data'): 
     name_list = os.listdir(data_path) 
 
@@ -77,7 +78,8 @@ def pickle_data_combine(data_path='./data'):
 
     output_path = os.path.join(data_path, 'train_combine.pkl') 
     with open(output_path, 'wb') as f: 
-        pickle.dump({'image_embedding': image_embedding, 'captions': captions}, f)
+        pickle.dump({'image_embedding': torch.cat(image_embedding, dim=0), 'captions': captions}, f)
+
 
 
 if __name__ == '__main__':
