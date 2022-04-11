@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from dataset import filter
 from random import sample 
 import requests 
+from tqdm import tqdm
 
 from model import CaptionModel 
 import clip 
@@ -69,6 +70,7 @@ def top_filtering(logits, top_k=0, top_p=0.0, threshold=-float('Inf'), filter_va
 def sample_sequence(image_features, model, tokenizer, args): 
     bos, eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS) 
     ys = [bos] 
+    prob_list = []
     for i in range(args.max_length): 
         tokens = torch.Tensor(ys).long().unsqueeze(0).to(device)
         outputs = model(tokens, image_features) 
@@ -77,17 +79,20 @@ def sample_sequence(image_features, model, tokenizer, args):
         probs = F.softmax(logits, dim=-1) 
 
         prev = torch.topk(probs, 1)[1] if args.no_sample else torch.multinomial(probs, 1) 
-        if i < args.min_length and prev.item() == eos:
-            while prev.item() == eos:
+        if i < args.min_length and prev.item() == eos: 
+            number = 1 
+            while prev.item() == eos: 
                 prev = torch.multinomial(probs, num_samples=1) 
-        
-        ys.append(prev.item()) 
+                number += 1
+                if number > 100: 
+                    break 
         
         if  prev.item() == eos: 
             break 
-    return ys 
 
-
+        ys.append(prev.item()) 
+        prob_list.append(torch.topk(probs, 1)[0].item())
+    return ys, np.mean(prob_list)
 
 
 def greedy_decode(image_features, model, tokenizer, args): 
@@ -172,34 +177,37 @@ def main():
     
     else: 
         print('test from data') 
-        data_path = './data/part-00044' 
-        samples = case_selection(data_path, 2) 
+        # data_path = './data/part-00044' 
+        # samples = case_selection(data_path, 2) 
+        
+
+        data_path = 'test/meishi_image_500K.txt' 
+        with open(data_path, 'r', encoding='utf-8') as f: 
+            lines = f.readlines() 
+        
+        lines = lines[1:3]
         results = []
-        for pair in samples: 
-            url = pair[1] 
-            if GPU_FLAG == True: 
-                url = mt_convert_url(url) 
-            image = Image.open(requests.get(url, stream=True).raw)
-            image = preprocess(image).unsqueeze(0).to(device)
-            image_features = clip_model.encode_image(image).float()
-            if DECODE_STRATEGY == 'greedy': 
-                caps = greedy_decode(image_features, model, tokenizer, args) 
-            elif DECODE_STRATEGY == 'sample': 
-                caps = sample_sequence(image_features, model, tokenizer, args) 
-                print(pair[1])
-                print(pair[0])
-                print(tokenizer.batch_decode(caps)) 
-                results.append('url: ' + pair[1])
-                results.append('annotation: ' + pair[0]) 
-                results.append('model: ' + list2str(tokenizer.batch_decode(caps))) 
-                results.append(' ')
-        with open('result.txt', 'w', encoding='utf-8') as f: 
-            for line in results: 
-                f.write(line + '\n')
-
-
-
-
+        progress = tqdm(total=len(lines), desc='image captioning') 
+        with torch.no_grad():
+            for line in lines: 
+                url = line.split('\t')[0] 
+                if GPU_FLAG == True: 
+                   url = mt_convert_url(url) 
+                image = Image.open(requests.get(url, stream=True).raw)
+                image = preprocess(image).unsqueeze(0).to(device)
+                image_features = clip_model.encode_image(image).float()
+                if DECODE_STRATEGY == 'greedy': 
+                    caps = greedy_decode(image_features, model, tokenizer, args)
+                    probs = .0 # not implemented  
+                elif DECODE_STRATEGY == 'sample': 
+                    caps, probs = sample_sequence(image_features, model, tokenizer, args) 
+                line = line.strip() + '\t' + list2str(tokenizer.batch_decode(caps[1:])) + '\t' + str(round(probs, 3)) 
+                results.append(line) 
+                progress.update()
+            with open('result.txt', 'w', encoding='utf-8') as f: 
+                for line in results: 
+                    f.write(line + '\n')
+        
 
 if __name__ =="__main__": 
     main()
