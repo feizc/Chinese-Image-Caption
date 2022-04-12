@@ -1,5 +1,4 @@
 # store the image embedding for training acceleration 
-from sys import flags
 import torch 
 from dataset import data_read, data_statics 
 from utils import mt_convert_url 
@@ -11,8 +10,12 @@ from PIL import Image
 import requests 
 
 
+from efficientnet_pytorch import EfficientNet  
+from utils import get_image_trans 
+
 DATA_STATIC = True 
 GPU_FLAG = False 
+CLIP_FLAG = False 
 device = "cuda:0" if torch.cuda.is_available() else "cpu" 
 
 
@@ -24,10 +27,19 @@ def main():
     if DATA_STATIC:
         data_statics(data)  
 
-    clip_model, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
+    if CLIP_FLAG == False:
+        model = EfficientNet.from_name('efficientnet-b4') 
+        model_path = './ckpt/efficientnet/0-gs1110000-checkpoint.pth.tar' 
+        param_data = torch.load(model_path, map_location=device) 
+        model.load_state_dict(param_data['state_dict'], strict=False)
+        preprocess = get_image_trans(train=False) 
+        model = model.to(device) 
+
+    else: 
+        model, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
     all_embeddings = [] 
     all_captions = [] 
-    for i in tqdm(range(len(data))): 
+    for i in tqdm(range(len(data))):
         d = {'caption': data[i][0]} 
         url = data[i][1] 
         if GPU_FLAG == True: 
@@ -38,8 +50,12 @@ def main():
             print(url) 
             continue 
         image = preprocess(image).unsqueeze(0).to(device) 
-        with torch.no_grad():
-            image_feature = clip_model.encode_image(image).cpu() 
+        with torch.no_grad(): 
+            if CLIP_FLAG == False:
+                image_feature = model.extract_features(image).view(1, -1).cpu()
+            else:
+                image_feature = model.encode_image(image).cpu() 
+        print(image_feature.size())
         d['image_embedding'] = i 
         all_captions.append(d) 
         all_embeddings.append(image_feature) 
@@ -52,7 +68,7 @@ def main():
     
     with open(output_path, 'wb') as f: 
         pickle.dump({'image_embedding': torch.cat(all_embeddings, dim=0), 'captions': all_captions}, f)
-
+    
 
 # combine the pickle from different sources 
 def pickle_data_combine(data_path='./data'): 
@@ -83,5 +99,5 @@ def pickle_data_combine(data_path='./data'):
 
 
 if __name__ == '__main__':
-    # main() 
-    pickle_data_combine()
+    main() 
+    # pickle_data_combine()

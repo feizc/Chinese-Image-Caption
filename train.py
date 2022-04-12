@@ -10,7 +10,7 @@ import numpy as np
 from shutil import copyfile 
 
 from dataset import CommentDataset, data_read, FastCommentDataset
-from model import CaptionModel 
+from model import CaptionModel, CaptionPrefix
 from torch.utils.data import Dataset, DataLoader 
 from utils import accuracy_compute 
 
@@ -109,7 +109,7 @@ def main():
     parser.add_argument('--epochs', type=int, default=10) 
     parser.add_argument('--warmup_steps', type=int, default=5000) 
     parser.add_argument('--mapping_type', type=str, default='transformer', help='mlp/transformer') 
-    parser.add_argument('--resume_last', type=bool, default=True)  
+    parser.add_argument('--resume_last', type=bool, default=False)  
     args = parser.parse_args()
     gpt2_path = 'ckpt/gpt2' 
     tokenizer = BertTokenizer.from_pretrained(gpt2_path) 
@@ -125,7 +125,7 @@ def main():
     train_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     prefix_dim = 512
-    model =  CaptionModel(args.prefix_length, tokenizer=tokenizer, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,
+    model =  CaptionPrefix(args.prefix_length, tokenizer=tokenizer, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,
                             num_layers=args.num_layers, mapping_type=args.mapping_type)
     model = model.to(device) 
 
