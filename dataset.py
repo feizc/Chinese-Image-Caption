@@ -64,6 +64,7 @@ class CommentDataset(Dataset):
         self.max_length = args.max_length 
         self.prefix_length = args.prefix_length 
         self.device = device 
+        self.flag = args.clip_flag
         self.bos, self.eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS)
 
     def __len__(self): 
@@ -88,8 +89,11 @@ class CommentDataset(Dataset):
             url = mt_convert_url(url)
         txt = img_txt_pair[0] 
         image = Image.open(requests.get(url, stream=True).raw)
-        image = self.image_preprocess(image).unsqueeze(0).to(self.device)
-        image_features = self.image_encoder.encode_image(image).squeeze(0)
+        image = self.image_preprocess(image).unsqueeze(0).to(self.device) 
+        if self.flag == True:
+            image_features = self.image_encoder.encode_image(image).squeeze(0)
+        else:
+            image_features = self.image_encoder.extract_features(image).view(-1)
         # image_features = torch.zeros((1, 512)).float().squeeze(0)
         txt_ids = torch.Tensor([self.bos] + tokenize(txt, self.tokenizer) + [self.eos]).long() 
         txt_ids, mask = self.pad_tokens(txt_ids)

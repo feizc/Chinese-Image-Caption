@@ -99,5 +99,5 @@ def pickle_data_combine(data_path='./data'):
 
 
 if __name__ == '__main__':
-    main() 
-    # pickle_data_combine()
+    #main() 
+    pickle_data_combine()

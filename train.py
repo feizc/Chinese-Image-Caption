@@ -11,10 +11,14 @@ from shutil import copyfile
 
 from dataset import CommentDataset, data_read, FastCommentDataset
 from model import CaptionModel, CaptionPrefix
-from torch.utils.data import Dataset, DataLoader 
+from torch.utils.data import Dataset, DataLoader
+from parse_data import CLIP_FLAG 
 from utils import accuracy_compute 
+from efficientnet_pytorch import EfficientNet  
+from utils import get_image_trans 
 
-FAST_TRAIN = True 
+FAST_TRAIN = False 
+CLIP_FLAG = False 
 
 device = "cuda" if torch.cuda.is_available() else "cpu" 
 SPECIAL_TOKENS = ["[bos]", "[eos]",] 
@@ -99,7 +103,7 @@ def main():
     parser = argparse.ArgumentParser() 
     parser.add_argument('--data_path', default='./data')
     parser.add_argument('--output_dir', default='./ckpt/caption') 
-    parser.add_argument('--fast_data_path', default='./data/train.pkl')
+    parser.add_argument('--fast_data_path', default='./data/train_combine.pkl')
     parser.add_argument('--prefix_length', type=int, default=10) 
     parser.add_argument('--max_length', type=int, default=30) 
     parser.add_argument('--num_layers', type=int, default=8) 
@@ -110,18 +114,26 @@ def main():
     parser.add_argument('--warmup_steps', type=int, default=5000) 
     parser.add_argument('--mapping_type', type=str, default='transformer', help='mlp/transformer') 
     parser.add_argument('--resume_last', type=bool, default=False)  
+    parser.add_argument('--clip_flag', type=bool, default=False)  
     args = parser.parse_args()
     gpt2_path = 'ckpt/gpt2' 
     tokenizer = BertTokenizer.from_pretrained(gpt2_path) 
     tokenizer.add_special_tokens(SPECIAL_TOKENS_DICT) 
-
-    clip_model, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
-
+    if CLIP_FLAG == True: 
+        image_encoder, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
+    else: 
+        image_encoder = EfficientNet.from_name('efficientnet-b4') 
+        model_path = './ckpt/efficientnet/0-gs1110000-checkpoint.pth.tar' 
+        param_data = torch.load(model_path, map_location=device) 
+        image_encoder.load_state_dict(param_data['state_dict'], strict=False)
+        preprocess = get_image_trans(train=False) 
+        image_encoder = image_encoder.to(device) 
+    
     if FAST_TRAIN == True: 
         dataset = FastCommentDataset(args.fast_data_path, tokenizer, args, device) 
     else:
         data = data_read(args.data_path) 
-        dataset = CommentDataset(data, tokenizer, preprocess, clip_model, args, device) 
+        dataset = CommentDataset(data, tokenizer, preprocess, image_encoder, args, device) 
     train_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     prefix_dim = 512

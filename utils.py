@@ -1,5 +1,15 @@
-import re 
+import re
 import torch 
+import torch.nn.functional as F 
+from torchvision import transforms 
+import numpy as np
+from PIL import Image
+
+try:
+    from torchvision.transforms import InterpolationMode
+    BICUBIC = InterpolationMode.BICUBIC
+except ImportError:
+    BICUBIC = Image.BICUBIC
 
 
 def mt_convert_url(url):
@@ -46,5 +56,41 @@ def accuracy_compute(logits, labels, top_k=5):
         if num != 0:
             length += 1
     return correct_total / float(length) 
+
+
+class SquarePad:
+    def __call__(self, image): 
+        w, h = image.size 
+        max_wh = np.max([w, h]) 
+        hp = int((max_wh - w) / 2) 
+        vp = int((max_wh - h) / 2) 
+        padding = (hp, vp, hp, vp) 
+        return F.pad(image, padding, (124, 117, 104), 'constant')
+
+
+def get_image_trans(train=True): 
+    normalize =  transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225]) 
+    if train==True: 
+        image_trans = transforms.Compose([
+            transforms.Resize(400, interpolation=BICUBIC), 
+            transforms.RandomCrop(380), 
+            _convert_image_to_rgb,
+            transforms.RandomHorizontalFlip(), 
+            transforms.ToTensor(),
+            normalize
+        ])
+    else: 
+        image_trans = transforms.Compose([
+            transforms.Resize(380, interpolation=BICUBIC),
+            transforms.RandomCrop(380), 
+            _convert_image_to_rgb,
+            transforms.ToTensor(),
+            normalize
+        ]) 
+    return image_trans 
+
+def _convert_image_to_rgb(image):
+    return image.convert("RGB")
 
 
