@@ -9,21 +9,25 @@ from dataset import filter
 from random import sample 
 import requests 
 from tqdm import tqdm
+import copy 
+
 
 from model import CaptionModel 
 import clip 
 from utils import mt_convert_url 
+from efficientnet_pytorch import EfficientNet  
+from utils import get_image_trans 
 
 
 
 SPECIAL_TOKENS = ["[bos]", "[eos]",] 
 SPECIAL_TOKENS_DICT = {'bos_token': "[bos]", 'eos_token': "[eos]"} 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"  
-# 'greedy' 
+# {'greedy', 'sample', 'beam_search'} 
 DECODE_STRATEGY = 'sample'
-FROM_URL = True 
+FROM_URL = False 
 GPU_FLAG = False  
-
+CLIP_FLAG = False 
 
 
 
@@ -79,9 +83,10 @@ def sample_sequence(image_features, model, tokenizer, args):
         probs = F.softmax(logits, dim=-1) 
 
         prev = torch.topk(probs, 1)[1] if args.no_sample else torch.multinomial(probs, 1) 
-        if i < args.min_length and prev.item() == eos: 
+
+        if (i < args.min_length and prev.item() == eos) or prev.item() == tokenizer.unk_token_id: 
             number = 1 
-            while prev.item() == eos: 
+            while prev.item() == eos or prev.item() == tokenizer.unk_token_id: 
                 prev = torch.multinomial(probs, num_samples=1) 
                 number += 1
                 if number > 100: 
@@ -89,7 +94,7 @@ def sample_sequence(image_features, model, tokenizer, args):
         
         if  prev.item() == eos: 
             break 
-
+        
         ys.append(prev.item()) 
         prob_list.append(torch.topk(probs, 1)[0].item())
     return ys, np.mean(prob_list)
@@ -109,6 +114,58 @@ def greedy_decode(image_features, model, tokenizer, args):
             break 
     return ys 
         
+
+
+
+def beam_search(image_features, model, tokenizer, args): 
+    bos, eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS)  
+    current_output = [bos] 
+    hyplist = [([], 0., current_output)] 
+    comp_hyplist = [] 
+    best_state = None
+
+    for i in range(args.max_length): 
+        new_hyplist = []
+        argmin = 0 
+        for out, lp, st in hyplist: 
+            tokens = torch.Tensor(out).long().unsqueeze(0).to(device)
+            outputs = model(tokens, image_features) 
+            logp = F.log_softmax(outputs.logits[:,-1], dim=-1) 
+            lp_vec = logp.cpu().data.numpy() + lp 
+            lp_vec = np.squeeze(lp_vec) 
+            if i >= args.min_length: 
+                new_lp = lp_vec[eos] + args.penalty * (len(out) + 1) 
+                comp_hyplist.append((out, new_lp)) 
+                if best_state is None or best_state < new_lp:
+                    best_state = new_lp 
+            count = 1
+            for o in np.argsort(lp_vec)[::-1]: 
+                if o == tokenizer.unk_token_id or o == eos:
+                    continue
+                new_lp = lp_vec[o]
+                if len(new_hyplist) == args.beam_size:
+                    if new_hyplist[argmin][1] < new_lp:
+                        new_st = copy.deepcopy(st)
+                        new_st.append(int(o))
+                        new_hyplist[argmin] = (out + [o], new_lp, new_st)
+                        argmin = min(enumerate(new_hyplist), key=lambda h: h[1][1])[0]
+                    else:
+                        break
+                else:
+                    new_st = copy.deepcopy(st)
+                    new_st.append(int(o))
+                    new_hyplist.append((out + [o], new_lp, new_st))
+                    if len(new_hyplist) == args.beam_size:
+                        argmin = min(enumerate(new_hyplist), key=lambda h: h[1][1])[0]
+                count += 1
+        hyplist = new_hyplist 
+    
+    if len(comp_hyplist) > 0:
+        maxhyps = sorted(comp_hyplist, key=lambda h: -h[1])[:1]
+        return maxhyps
+    else:
+        return [([], 0)]
+
 
 
 def test_data_read(path): 
@@ -140,18 +197,30 @@ def main():
     parser.add_argument('--prefix_length_clip', type=int, default=10) 
     parser.add_argument('--num_layers', type=int, default=8) 
     parser.add_argument('--mapping_type', type=str, default='transformer', help='mlp/transformer')
+    parser.add_argument('--batch_size', type=int, default=1) 
     parser.add_argument('--max_length', type=int, default=30) 
     parser.add_argument("--no_sample", type=bool, default=False, help="Set to use greedy decoding instead of sampling")
     parser.add_argument('--min_length', type=int, default=5) 
     parser.add_argument("--temperature", type=int, default=0.7, help="Sampling softmax temperature")
     parser.add_argument("--top_k", type=int, default=0, help="Filter top-k tokens before sampling (<=0: no filtering)")
     parser.add_argument("--top_p", type=float, default=0.9, help="Nucleus filtering (top-p) before sampling (<=0.0: no filtering)")
+    parser.add_argument("--penalty", type=float, default=0.3, help="elngth penalty")
+    parser.add_argument("--beam_size", type=int, default=5, help="Beam size")
     args = parser.parse_args()
 
     tokenizer = BertTokenizer.from_pretrained(args.token_path) 
     tokenizer.add_special_tokens(SPECIAL_TOKENS_DICT) 
     
-    clip_model, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
+    if CLIP_FLAG == True: 
+        image_encoder, preprocess = clip.load("ckpt/clip/ViT-B-32.pt", device=device) 
+    else: 
+        image_encoder = EfficientNet.from_name('efficientnet-b4') 
+        model_path = './ckpt/efficientnet/0-gs1110000-checkpoint.pth.tar' 
+        param_data = torch.load(model_path, map_location=device) 
+        image_encoder.load_state_dict(param_data['state_dict'], strict=False)
+        preprocess = get_image_trans(train=False) 
+        image_encoder = image_encoder.to(device) 
+    
     prefix_dim = 512
     model =  CaptionModel(args.prefix_length, tokenizer=tokenizer, clip_length=args.prefix_length_clip, prefix_size=prefix_dim,
                             num_layers=args.num_layers, mapping_type=args.mapping_type) 
@@ -160,21 +229,30 @@ def main():
     model.load_state_dict(weight_dict['state_dict'], strict=False) 
     model = model.to(device) 
     model.eval() 
+    
 
     if FROM_URL == False: 
         print('test from case')
         img_name_list = test_data_read(args.data_path) 
         for img_name in img_name_list: 
+            if '.jpeg' not in img_name: 
+                continue 
             img_path = os.path.join(args.data_path, img_name) 
             image = Image.open(img_path) 
-            image = preprocess(image).unsqueeze(0).to(device)
-            image_features = clip_model.encode_image(image).float()
+            image = preprocess(image).unsqueeze(0).to(device) 
+            if CLIP_FLAG == True:
+                image_features = image_encoder.encode_image(image).float()
+            else:
+                image_features = image_encoder.extract_features(image).view(1, -1) 
             if DECODE_STRATEGY == 'greedy': 
                 caps = greedy_decode(image_features, model, tokenizer, args) 
             elif DECODE_STRATEGY == 'sample': 
-                caps = sample_sequence(image_features, model, tokenizer, args)
+                caps, probs = sample_sequence(image_features, model, tokenizer, args)
                 print(tokenizer.batch_decode(caps)) 
-    
+            elif DECODE_STRATEGY == 'beam_search':
+                caps = beam_search(image_features, model, tokenizer, args) 
+                print(caps)
+                print(tokenizer.decode(caps[0][0][1:]))
     else: 
         print('test from data') 
         # data_path = './data/part-00044' 
@@ -195,7 +273,7 @@ def main():
                    url = mt_convert_url(url) 
                 image = Image.open(requests.get(url, stream=True).raw)
                 image = preprocess(image).unsqueeze(0).to(device)
-                image_features = clip_model.encode_image(image).float()
+                image_features = image_encoder.encode_image(image).float()
                 if DECODE_STRATEGY == 'greedy': 
                     caps = greedy_decode(image_features, model, tokenizer, args)
                     probs = .0 # not implemented  
