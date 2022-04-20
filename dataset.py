@@ -102,6 +102,59 @@ class CommentDataset(Dataset):
 
 
 
+
+class LabelDataset(Dataset): 
+    def __init__(self, data, tokenizer, image_preprocess, image_encoder, args, device):
+        self.data = data 
+        self.tokenizer = tokenizer 
+        self.image_preprocess = image_preprocess 
+        self.image_encoder = image_encoder 
+        self.max_length = args.max_length 
+        self.prefix_length = args.prefix_length 
+        self.device = device 
+        self.flag = args.clip_flag
+        self.bos, self.eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS)
+        self.left, self.right = tokenizer.convert_tokens_to_ids(['「', '」'])
+
+    def __len__(self): 
+        return len(self.data) 
+
+    def pad_tokens(self, text_ids): 
+        padding = self.max_length - text_ids.shape[0] 
+        if padding > 0: 
+            text_ids = torch.cat((text_ids, torch.zeros(padding, dtype=torch.int64)-1)) 
+        elif padding < 0: 
+            text_ids = text_ids[:self.max_length] 
+        mask = text_ids.ge(0) 
+        text_ids[~mask] = 0 
+        mask = mask.float()
+        mask = torch.cat((torch.ones(self.prefix_length), mask), dim=0)  # adding prefix mask
+        return text_ids, mask
+
+    def __getitem__(self, index): 
+        img_txt_pair = self.data[index] 
+        url = img_txt_pair[1] 
+        if GPU_FLAG == True: 
+            url = mt_convert_url(url)
+        txt = img_txt_pair[0] 
+        try:
+            image = Image.open(requests.get(url, stream=True).raw)
+            image = self.image_preprocess(image).unsqueeze(0).to(self.device) 
+            if self.flag == True:
+                image_features = self.image_encoder.encode_image(image).squeeze(0)
+            else:
+                image_features = self.image_encoder.extract_features(image).view(-1)
+        except:
+            print(url)
+            image_features = torch.zeros((1, 216832)).float().squeeze(0).to(self.device)
+        # image_features = torch.zeros((1, 512)).float().squeeze(0)
+        txt_ids = torch.Tensor([self.bos, self.left] + tokenize(txt, self.tokenizer) + [self.right, self.eos]).long() 
+        txt_ids, mask = self.pad_tokens(txt_ids)
+        return image_features, txt_ids, mask 
+
+
+
+
 class FastCommentDataset(Dataset): 
     def __init__(self, data_path, tokenizer, args, device): 
         self.tokenizer = tokenizer 

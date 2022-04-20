@@ -9,7 +9,7 @@ import random
 import numpy as np 
 from shutil import copyfile 
 
-from dataset import CommentDataset, data_read, FastCommentDataset
+from dataset import LabelDataset, data_read, FastCommentDataset
 from model import CaptionModel, CaptionPrefix
 from torch.utils.data import Dataset, DataLoader
 from parse_data import CLIP_FLAG 
@@ -133,7 +133,7 @@ def main():
     
     
     data = label_combine(args.data_path) 
-    dataset = CommentDataset(data, tokenizer, preprocess, image_encoder, args, device) 
+    dataset = LabelDataset(data, tokenizer, preprocess, image_encoder, args, device) 
     train_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     prefix_dim = 512
