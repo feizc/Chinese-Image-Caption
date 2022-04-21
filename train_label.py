@@ -9,7 +9,7 @@ import random
 import numpy as np 
 from shutil import copyfile 
 
-from dataset import LabelDataset, data_read, FastCommentDataset
+from dataset import LabelDataset, data_read, FastLabelDataset
 from model import CaptionModel, CaptionPrefix
 from torch.utils.data import Dataset, DataLoader
 from parse_data import CLIP_FLAG 
@@ -18,7 +18,7 @@ from efficientnet_pytorch import EfficientNet
 from utils import get_image_trans 
 from parse_data import label_combine 
 
-FAST_TRAIN = False 
+FAST_TRAIN = True
 CLIP_FLAG = False 
 
 device = "cuda" if torch.cuda.is_available() else "cpu" 
@@ -132,8 +132,11 @@ def main():
         image_encoder = image_encoder.to(device) 
     
     
-    data = label_combine(args.data_path) 
-    dataset = LabelDataset(data, tokenizer, preprocess, image_encoder, args, device) 
+    if FAST_TRAIN == False:
+        data = label_combine(args.data_path) 
+        dataset = LabelDataset(data, tokenizer, preprocess, image_encoder, args, device) 
+    else: 
+        dataset = FastLabelDataset(tokenizer, preprocess, image_encoder, args, device) 
     train_dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
     prefix_dim = 512

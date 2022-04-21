@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 import torch 
 from PIL import Image 
 import requests 
+import io 
 
 
 from PIL import ImageFile
@@ -101,8 +102,6 @@ class CommentDataset(Dataset):
     
 
 
-
-
 class LabelDataset(Dataset): 
     def __init__(self, data, tokenizer, image_preprocess, image_encoder, args, device):
         self.data = data 
@@ -151,6 +150,75 @@ class LabelDataset(Dataset):
         txt_ids = torch.Tensor([self.bos, self.left] + tokenize(txt, self.tokenizer) + [self.right, self.eos]).long() 
         txt_ids, mask = self.pad_tokens(txt_ids)
         return image_features, txt_ids, mask 
+
+
+
+
+class FastLabelDataset(Dataset): 
+    def __init__(self, tokenizer, image_preprocess, image_encoder, args, device):
+        self.data_path = args.data_path 
+        self.file_name_list = os.listdir(self.data_path) 
+        self.file_name_list = [x for x in self.file_name_list if '.pkl' in x]  
+        self.file_idx = 0 
+        self.file_path = os.path.join(self.data_path, self.file_name_list[self.file_idx]) 
+        self.file = open(self.file_path, 'rb')
+
+        self.tokenizer = tokenizer 
+        self.image_preprocess = image_preprocess 
+        self.image_encoder = image_encoder 
+        self.max_length = args.max_length 
+        self.prefix_length = args.prefix_length 
+        self.device = device 
+        self.flag = args.clip_flag
+        self.bos, self.eos = tokenizer.convert_tokens_to_ids(SPECIAL_TOKENS)
+        self.left, self.right = tokenizer.convert_tokens_to_ids(['「', '」'])
+
+    def __len__(self): 
+        return 10
+
+    def pad_tokens(self, text_ids): 
+        padding = self.max_length - text_ids.shape[0] 
+        if padding > 0: 
+            text_ids = torch.cat((text_ids, torch.zeros(padding, dtype=torch.int64)-1)) 
+        elif padding < 0: 
+            text_ids = text_ids[:self.max_length] 
+        mask = text_ids.ge(0) 
+        text_ids[~mask] = 0 
+        mask = mask.float()
+        mask = torch.cat((torch.ones(self.prefix_length), mask), dim=0)  # adding prefix mask
+        return text_ids, mask
+
+    def __getitem__(self, index): 
+        try:
+            data = pickle.load(self.file) 
+            image = io.BytesIO(data[2]) 
+            image = Image.open(image) 
+        except: 
+            self.file.close() 
+            self.file_idx += 1 
+            self.file_path = os.path.join(self.data_path, self.file_name_list[self.file_idx]) 
+            self.file = open(self.file_path, 'rb') 
+
+            data = pickle.load(self.file) 
+            image = io.BytesIO(data[2]) 
+            image = Image.open(image) 
+
+        
+        txt = data[3].strip().split('\t')[1]
+        try:
+            image = self.image_preprocess(image).unsqueeze(0).to(self.device) 
+            if self.flag == True:
+                image_features = self.image_encoder.encode_image(image).squeeze(0)
+            else:
+                image_features = self.image_encoder.extract_features(image).view(-1)
+        except:
+            print(self.file_name_list[self.file_idx])
+            image_features = torch.zeros((1, 216832)).float().squeeze(0).to(self.device)
+        # image_features = torch.zeros((1, 512)).float().squeeze(0)
+        txt_ids = torch.Tensor([self.bos, self.left] + tokenize(txt, self.tokenizer) + [self.right, self.eos]).long() 
+        txt_ids, mask = self.pad_tokens(txt_ids)
+        return image_features, txt_ids, mask 
+
 
 
 
